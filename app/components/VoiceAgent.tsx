@@ -3,7 +3,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useConversation } from "@elevenlabs/react";
 import { Phone, PhoneOff, Mic } from "lucide-react";
-import Transcript, { TranscriptMessage } from "./Transcript";
 import {
   BackendSystem,
   CustomerInfoDisplay,
@@ -22,6 +21,12 @@ interface Props {
   onRechargeConfirmation: (data: RechargeConfirmationDisplay) => void;
 }
 
+function formatDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+}
+
 export default function VoiceAgent({
   onActiveSystemChange,
   onCustomerInfo,
@@ -30,9 +35,11 @@ export default function VoiceAgent({
   onTicketInfo,
   onRechargeConfirmation,
 }: Props) {
-  const [messages, setMessages] = useState<TranscriptMessage[]>([]);
   const [language, setLanguage] = useState<string>("Hinglish");
+  const [callDuration, setCallDuration] = useState(0);
+  const [error, setError] = useState<string | null>(null);
   const activeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const highlightSystem = useCallback(
     (system: BackendSystem) => {
@@ -47,16 +54,7 @@ export default function VoiceAgent({
 
   const conversation = useConversation({
     onMessage: (message) => {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: message.source === "ai" ? "agent" : "user",
-          text: message.message,
-          timestamp: new Date(),
-        },
-      ]);
-
-      // Simple language detection
+      // Language detection from agent messages
       const text = message.message.toLowerCase();
       const hindiPattern = /[\u0900-\u097F]|kya|hai|mein|mera|kaise|nahi|kitna|aapka|kab|chahiye/;
       const englishPattern = /^[a-zA-Z0-9\s.,!?'"()-]+$/;
@@ -106,6 +104,21 @@ export default function VoiceAgent({
   const isConnected = status === "connected";
   const isConnecting = status === "connecting";
 
+  // Call duration timer
+  useEffect(() => {
+    if (isConnected) {
+      setCallDuration(0);
+      timerRef.current = setInterval(() => {
+        setCallDuration((prev) => prev + 1);
+      }, 1000);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [isConnected]);
+
   useEffect(() => {
     return () => {
       if (activeTimeoutRef.current) clearTimeout(activeTimeoutRef.current);
@@ -113,13 +126,22 @@ export default function VoiceAgent({
   }, []);
 
   const handleStart = async () => {
+    setError(null);
     try {
+      if (!process.env.NEXT_PUBLIC_AGENT_ID) {
+        setError("Agent ID not configured. Set NEXT_PUBLIC_AGENT_ID in environment variables.");
+        return;
+      }
       await navigator.mediaDevices.getUserMedia({ audio: true });
       await conversation.startSession({
-        agentId: process.env.NEXT_PUBLIC_AGENT_ID!,
+        agentId: process.env.NEXT_PUBLIC_AGENT_ID,
         connectionType: "webrtc",
       });
     } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to start call";
+      setError(msg.includes("Permission") || msg.includes("NotAllowed")
+        ? "Microphone access denied. Please allow microphone permissions."
+        : msg);
       console.error("Failed to start:", err);
     }
   };
@@ -130,89 +152,112 @@ export default function VoiceAgent({
   };
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider flex items-center gap-2">
-          <Mic size={14} className="text-red-500" />
-          Voice Agent
-        </h2>
-        {isConnected && (
-          <span className="text-[10px] font-medium bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+    <div className="flex flex-col h-full items-center justify-center">
+      {/* Language badge */}
+      {isConnected && (
+        <div className="mb-6">
+          <span className="text-[10px] font-medium bg-gray-100 text-gray-500 px-3 py-1 rounded-full uppercase tracking-wider">
             {language}
           </span>
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* Orb */}
-      <div className="flex justify-center py-8">
-        <div className="relative">
-          {/* Pulse ring */}
-          {isConnected && isSpeaking && (
-            <div className="absolute inset-0 rounded-full bg-red-400 animate-ping opacity-20" />
-          )}
-          {isConnecting && (
-            <div className="absolute inset-0 rounded-full bg-amber-400 animate-ping opacity-20" />
-          )}
-          {/* Main orb */}
-          <div
-            className={`relative w-28 h-28 rounded-full flex items-center justify-center transition-all duration-500 ${
+      {/* Orb area */}
+      <div className="relative flex items-center justify-center my-8">
+        {/* Outer ripple rings */}
+        {isConnected && isSpeaking && (
+          <>
+            <div className="absolute w-48 h-48 rounded-full border border-red-200 animate-ping opacity-10" />
+            <div className="absolute w-40 h-40 rounded-full border border-red-300 animate-ping opacity-15" style={{ animationDelay: "0.3s" }} />
+          </>
+        )}
+        {isConnected && !isSpeaking && (
+          <div className="absolute w-40 h-40 rounded-full border border-red-200 animate-pulse opacity-20" />
+        )}
+        {isConnecting && (
+          <div className="absolute w-40 h-40 rounded-full border border-amber-300 animate-ping opacity-15" />
+        )}
+
+        {/* Main orb */}
+        <div
+          className={`relative w-32 h-32 rounded-full flex items-center justify-center transition-all duration-700 ease-in-out ${
+            isConnected
+              ? isSpeaking
+                ? "bg-gradient-to-br from-red-500 to-red-600 shadow-[0_0_60px_rgba(239,68,68,0.5)] scale-110"
+                : "bg-gradient-to-br from-red-500 to-red-600 shadow-[0_0_30px_rgba(239,68,68,0.3)]"
+              : isConnecting
+              ? "bg-gradient-to-br from-amber-400 to-amber-500 shadow-[0_0_30px_rgba(251,191,36,0.3)] animate-pulse"
+              : "bg-gray-200"
+          }`}
+        >
+          <Mic
+            size={40}
+            className={`transition-all duration-500 ${
               isConnected
                 ? isSpeaking
-                  ? "bg-red-500 shadow-[0_0_40px_rgba(239,68,68,0.5)] scale-110"
-                  : "bg-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)]"
+                  ? "text-white scale-110"
+                  : "text-white/90"
                 : isConnecting
-                ? "bg-amber-400 shadow-[0_0_20px_rgba(251,191,36,0.3)]"
-                : "bg-gray-200"
+                ? "text-white"
+                : "text-gray-400"
             }`}
-          >
-            <Mic
-              size={36}
-              className={`transition-colors ${
-                isConnected || isConnecting ? "text-white" : "text-gray-400"
-              }`}
-            />
-          </div>
+          />
         </div>
       </div>
 
+      {/* Call timer */}
+      {isConnected && (
+        <div className="mb-2">
+          <span className="text-2xl font-mono font-light text-gray-800 tracking-widest">
+            {formatDuration(callDuration)}
+          </span>
+        </div>
+      )}
+
       {/* Status text */}
-      <p className="text-center text-xs text-gray-400 mb-4">
+      <p className="text-sm text-gray-400 mb-8">
         {isConnecting
-          ? "Connecting..."
+          ? "Connecting to Airtel AI..."
           : isConnected
           ? isSpeaking
-            ? "Agent is speaking..."
+            ? "Agent is speaking"
             : "Listening..."
-          : "Click Start Call to begin"}
+          : "Call Airtel AI Support"}
       </p>
 
       {/* Controls */}
-      <div className="flex justify-center gap-3 mb-4">
+      <div className="flex justify-center gap-4">
         {!isConnected ? (
           <button
             onClick={handleStart}
             disabled={isConnecting}
-            className="flex items-center gap-2 bg-red-600 hover:bg-red-700 disabled:bg-gray-300 text-white text-sm font-medium px-6 py-2.5 rounded-full transition-colors"
+            className="w-16 h-16 rounded-full bg-green-500 hover:bg-green-600 disabled:bg-gray-300 text-white flex items-center justify-center transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-105 active:scale-95"
           >
-            <Phone size={16} />
-            {isConnecting ? "Connecting..." : "Start Call"}
+            <Phone size={24} />
           </button>
         ) : (
           <button
             onClick={handleEnd}
-            className="flex items-center gap-2 bg-gray-800 hover:bg-gray-900 text-white text-sm font-medium px-6 py-2.5 rounded-full transition-colors"
+            className="w-16 h-16 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-105 active:scale-95"
           >
-            <PhoneOff size={16} />
-            End Call
+            <PhoneOff size={24} />
           </button>
         )}
       </div>
 
-      {/* Transcript */}
-      <div className="flex-1 min-h-0 border-t border-gray-100 pt-3">
-        <Transcript messages={messages} />
-      </div>
+      {/* Error */}
+      {error && (
+        <p className="text-xs text-red-500 mt-4 text-center max-w-xs">
+          {error}
+        </p>
+      )}
+
+      {/* Hint */}
+      {!isConnected && !isConnecting && !error && (
+        <p className="text-[10px] text-gray-300 mt-4">
+          Try: &quot;Mera balance kitna hai?&quot; or &quot;My internet is slow&quot;
+        </p>
+      )}
     </div>
   );
 }
