@@ -28,13 +28,22 @@ export default function LandingPage() {
             <span className="text-2xl font-bold text-red-600">airtel</span>
             <span className="text-sm text-gray-400 font-medium">AI Support</span>
           </div>
-          <Link
-            href="/demo"
-            className="inline-flex items-center gap-2 px-5 py-2.5 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition-colors"
-          >
-            Try Live Demo
-            <ArrowRight className="w-4 h-4" />
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link
+              href="/analytics"
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:border-red-200 hover:text-red-600 transition-colors"
+            >
+              <BarChart3 className="w-4 h-4" />
+              Analytics
+            </Link>
+            <Link
+              href="/demo"
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition-colors"
+            >
+              Try Live Demo
+              <ArrowRight className="w-4 h-4" />
+            </Link>
+          </div>
         </div>
       </nav>
 
